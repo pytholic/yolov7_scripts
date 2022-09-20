@@ -22,15 +22,13 @@ def print_text(img, text: str, org=(100,100), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
 
 
 def detect(frame, save_img=False):
-    weights, imgsz = opt.weights, opt.img_size
+    
+    imgsz = opt.img_size
 
     # Initialize
     set_logging()
-    device = select_device(opt.device)
     half = device.type != 'cpu'  # half precision only supported on CUDA
-
-    # Load model
-    model = attempt_load(weights, map_location=device)  # load FP32 model
+    
     stride = int(model.stride.max())  # model stride
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
@@ -41,7 +39,7 @@ def detect(frame, save_img=False):
     classify = False
     if classify:
         modelc = load_classifier(name='resnet101', n=2)  # initialize
-        modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model']).to(device).eval()
+        modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model']).to(device).eval() 
 
     # Load image and preprocess
     im0s = frame
@@ -51,19 +49,20 @@ def detect(frame, save_img=False):
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
-    idx = names.index('handbag')
-    names[idx] = 'seatbelt'
+    try:
+        idx = names.index('handbag')
+        names[idx] = 'seatbelt'
+    except: 
+        pass
     
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
 
     # Run inference
-    if device.type != 'cpu':
-        model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+    # if device.type != 'cpu':
+    #     model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
     old_img_w = old_img_h = imgsz
     old_img_b = 1
 
-    start = time.time() 
-        
     img = torch.from_numpy(img).to(device)
     #print(img.shape)
     img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -74,18 +73,19 @@ def detect(frame, save_img=False):
         #print(img.shape)
 
     # Warmup
-    if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
-        old_img_b = img.shape[0]
-        old_img_h = img.shape[2]
-        old_img_w = img.shape[3]
-        for i in range(3):
-            model(img, augment=opt.augment)[0]  
-         
+    # if device.type != 'cpu' and (old_img_b != img.shape[0] or old_img_h != img.shape[2] or old_img_w != img.shape[3]):
+    #     old_img_b = img.shape[0]
+    #     old_img_h = img.shape[2]
+    #     old_img_w = img.shape[3]
+    #     for i in range(3):
+    #         model(img, augment=opt.augment)[0]  
+        
+
     # Inference
     t1 = time_synchronized()
     pred = model(img, augment=opt.augment)[0]
     t2 = time_synchronized()
-    
+    print(t2-t1)
     # Apply NMS
     pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
     t3 = time_synchronized()
@@ -142,7 +142,7 @@ def detect(frame, save_img=False):
                 plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
                 
         # Print time (inference + NMS)
-        print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')        
+        print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')     
 
         return im0, pred_left, pred_right
 
@@ -154,7 +154,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
-    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
@@ -162,13 +162,24 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     print(opt)
 
+    # Load model
+    weights = opt.weights
+    device = select_device(opt.device)
+    model = attempt_load(weights, map_location=device)  # load FP32 model
+
     VIDEO = './test_videos/3.mp4'
     cap = cv2.VideoCapture(VIDEO)
     while True:
         with torch.no_grad():
-            _, image = cap.read()
 
+            _, image = cap.read()
+            image = cv2.resize(image, (854, 480))
+
+            s1 = time.perf_counter()
             img, pred_left, pred_right = detect(frame=image)
+            e1 = time.perf_counter()
+            print(e1-s1)
+
 
             print(f"Prediction left : {pred_left}")
             print(f"Prediction right : {pred_right}")
@@ -180,8 +191,8 @@ if __name__ == '__main__':
                 cv2.destroyAllWindows() 
 
 
-    #image = cv2.imread('/home/pytholic/Desktop/Projects/icms_data/data/images/4/0400002.jpg')
-    #test_dir = '/home/pytholic/Desktop/Projects/icms_data/data/images/4/'
+    # image = cv2.imread('/home/pytholic/Desktop/Projects/icms_data/data/images/4/0400002.jpg')
+    # test_dir = '/home/pytholic/Desktop/Projects/icms_data/data/images/4/'
     # with torch.no_grad():
     #     for image_path in glob.glob(test_dir + '*.jpg'):
     #         image = cv2.imread(image_path)
